@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>聊天</title>
+  <script src="https://cdn.jsdelivr.net/npm/compressorjs@1.2.1/dist/compressor.min.js"></script>
+  <style>
+    body{background:#f1f1f1;font-family:Arial;margin:0;padding:10px}
+    .box{max-width:380px;margin:50px auto;background:#fff;padding:20px;border-radius:12px}
+    input{width:100%;padding:12px;margin:6px 0;box-sizing:border-box;border:1px solid #ddd;border-radius:8px}
+    button{width:100%;padding:12px;background:#07C160;color:white;border:none;border-radius:8px;margin-top:6px;font-weight:bold}
+    #tip{text-align:center;margin-top:10px;color:red}
+    #chat{display:none}
+
+    #topBar{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:10px;
+      font-weight:bold;
+    }
+    #online{
+      color:#07C160;
+      font-size:14px;
+    }
+
+    #msg{
+      background:#fff;
+      padding:12px;
+      border-radius:10px;
+      height:400px;
+      overflow-y:auto;
+      margin-bottom:10px;
+      box-shadow:0 1px 3px #00000010
+    }
+
+    .bubble{
+      max-width:70%;
+      padding:8px 12px;
+      border-radius:12px;
+      margin:6px 0;
+      position:relative;
+      word-wrap:break-word;
+    }
+    .bubble-left{
+      background:#f8f9fa;
+      margin-right:auto;
+      border-bottom-left-radius:4px;
+    }
+    .bubble-right{
+      background:#07C160;
+      color:#fff;
+      margin-left:auto;
+      border-bottom-right-radius:4px;
+    }
+    .bubble-right .time{color:#ffffffaa}
+    .bubble-right .duration{color:#ffffffdd}
+
+    .name{font-size:12px;margin-bottom:4px;display:block}
+    .time{font-size:12px;margin-left:6px}
+    .duration{font-size:12px;margin-left:6px}
+    audio,img,video{max-width:100%;border-radius:6px;margin-top:4px}
+
+    .recallBtn{
+      font-size:12px;
+      color:#e74c3c;
+      cursor:pointer;
+      margin-left:8px;
+    }
+
+    .voice-btn{background:#ff6b6b}
+    .img-btn{background:#3498db}
+    .video-btn{background:#9b59b6}
+    .emo-btn{background:#f39c12}
+    .recording{background:#e74c3c;animation:pulse 1s infinite}
+    @keyframes pulse{0%{opacity:1}50%{opacity:.8}100%{opacity:1}}
+
+    #emoPanel{
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px;
+      padding:8px;
+      background:#fff;
+      border-radius:8px;
+      margin-bottom:8px;
+    }
+    .emo{
+      font-size:20px;
+      padding:4px 8px;
+      background:#f5f5f5;
+      border-radius:6px;
+      cursor:pointer;
+    }
+  </style>
+</head>
+<body>
+
+<div class="box" id="loginBox">
+  <h3>登录/注册</h3>
+  <input id="user" placeholder="输入账号">
+  <input id="pwd" placeholder="输入密码" type="password">
+  <button onclick="reg()">注册</button>
+  <button onclick="login()">登录</button>
+  <div id="tip"></div>
+</div>
+
+<div id="chat">
+  <div id="topBar">
+    <div>聊天大厅</div>
+    <div id="online">在线：0</div>
+  </div>
+
+  <div id="msg"></div>
+
+  <div id="emoPanel">
+    <div class="emo" onclick="sendEmo('😀')">😀</div>
+    <div class="emo" onclick="sendEmo('😂')">😂</div>
+    <div class="emo" onclick="sendEmo('😍')">😍</div>
+    <div class="emo" onclick="sendEmo('🤔')">🤔</div>
+    <div class="emo" onclick="sendEmo('😭')">😭</div>
+    <div class="emo" onclick="sendEmo('😡')">😡</div>
+    <div class="emo" onclick="sendEmo('👍')">👍</div>
+    <div class="emo" onclick="sendEmo('❤️')">❤️</div>
+    <div class="emo" onclick="sendEmo('🎉')">🎉</div>
+    <div class="emo" onclick="sendEmo('🔥')">🔥</div>
+  </div>
+
+  <input id="text" placeholder="输入消息" style="width:100%;box-sizing:border-box;">
+  <button onclick="send()">发送文字</button>
+  <button class="img-btn" onclick="document.getElementById('fileImg').click()">发送图片</button>
+  <input type="file" id="fileImg" accept="image/jpeg,image/png,image/gif" style="display:none">
+
+  <button class="video-btn" onclick="document.getElementById('fileVid').click()">发送视频</button>
+  <input type="file" id="fileVid" accept="video/mp4" style="display:none">
+
+  <button id="voiceBtn" class="voice-btn" onclick="toggleVoice()">点击录音</button>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io({
+  maxHttpBufferSize: 100 * 1024 * 1024,
+  pingTimeout: 60000
+});
+let username = '';
+
+let mediaRecorder;
+let audioChunks = [];
+let isRecording = false;
+let startTime;
+
+function showTip(t){
+  document.getElementById('tip').innerText = t;
+}
+
+// 👇 只改了这里：注册改用 socket
+function reg(){
+  const u = document.getElementById('user').value;
+  const p = document.getElementById('pwd').value;
+  if(!u||!p) return showTip('账号密码不能为空');
+
+  socket.emit('register', { user: u, pwd: p }, (res) => {
+    showTip(res.msg);
+  });
+}
+
+// 👇 只改了这里：登录改用 socket
+function login(){
+  const u = document.getElementById('user').value;
+  const p = document.getElementById('pwd').value;
+  if(!u||!p) return showTip('账号密码不能为空');
+
+  socket.emit('login', { user: u, pwd: p }, (res) => {
+    showTip(res.msg);
+    if(res.ok){
+      username = u;
+      socket.emit('setUser', username);
+      document.getElementById('loginBox').style.display='none';
+      document.getElementById('chat').style.display='block';
+    }
+  });
+}
+
+function send(){
+  const t = document.getElementById('text').value.trim();
+  if(!t) return;
+  socket.emit('msg', {name:username, type:'text', content:t});
+  document.getElementById('text').value = '';
+}
+
+function sendEmo(e){
+  socket.emit('msg',{name:username, type:'text', content:e});
+}
+
+document.getElementById('fileImg').onchange = function(e){
+  const file = e.target.files[0];
+  if(!file) return;
+
+  const allowed = ['image/jpeg','image/png','image/gif'];
+  if(!allowed.includes(file.type)){
+    alert('仅支持JPG/PNG/GIF');
+    document.getElementById('fileImg').value='';
+    return;
+  }
+
+  new Compressor(file, {
+    quality: 0.5,
+    maxWidth: 1000,
+    maxHeight: 1000,
+    mimeType: 'image/jpeg',
+    success(blob) {
+      const reader = new FileReader();
+      reader.readAsDataURL(blob);
+      reader.onloadend = () => {
+        socket.emit('msg', {
+          name: username,
+          type: 'image',
+          content: reader.result
+        });
+      };
+      document.getElementById('fileImg').value = '';
+    },
+    error(err) {
+      console.error('压缩失败，直接上传',err);
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onloadend = () => {
+        socket.emit('msg', {name:username, type:'image', content:reader.result});
+      };
+      document.getElementById('fileImg').value='';
+    }
+  });
+};
+
+document.getElementById('fileVid').onchange = function(e){
+  const file = e.target.files[0];
+  if(!file) return;
+
+  if(file.type !== 'video/mp4'){
+    alert('仅支持MP4视频');
+    document.getElementById('fileVid').value='';
+    return;
+  }
+
+  if(file.size > 50*1024*1024){
+    alert('视频不能超过50MB');
+    document.getElementById('fileVid').value='';
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.readAsDataURL(file);
+  reader.onloadend = () => {
+    socket.emit('msg', {
+      name: username,
+      type: 'video',
+      content: reader.result
+    });
+    document.getElementById('fileVid').value = '';
+  };
+};
+
+async function toggleVoice(){
+  const btn = document.getElementById('voiceBtn');
+  try {
+    if (!window.isSecureContext) {
+      alert('必须使用 HTTPS 或 localhost 才能录音');
+      return;
+    }
+
+    if(!isRecording){
+      const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+      let mimeType;
+      if (MediaRecorder.isTypeSupported('audio/webm; codecs=opus')) {
+        mimeType = 'audio/webm; codecs=opus';
+      } else {
+        mimeType = 'audio/mp4';
+      }
+      mediaRecorder = new MediaRecorder(stream, {mimeType});
+      audioChunks = [];
+      startTime = Date.now();
+
+      mediaRecorder.ondataavailable = e=>audioChunks.push(e.data);
+      mediaRecorder.onstop = ()=>{
+        const dur = ((Date.now()-startTime)/1000).toFixed(1);
+        const blob = new Blob(audioChunks,{type: mediaRecorder.mimeType});
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onloadend = ()=>{
+          socket.emit('msg',{name:username, type:'voice', content:reader.result, duration:dur});
+        };
+        stream.getTracks().forEach(track => track.stop());
+      };
+      mediaRecorder.start();
+      isRecording = true;
+      btn.innerText = '正在录音…';
+      btn.classList.add('recording');
+    }else{
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+      }
+      isRecording = false;
+      btn.innerText = '点击录音';
+      btn.classList.remove('recording');
+    }
+  } catch (err) {
+    console.error('录音失败：', err);
+    let msg = '录音失败：';
+    if (err.name === 'NotAllowedError') msg += '请允许麦克风权限';
+    else if (err.name === 'NotReadableError') msg += '麦克风被占用';
+    else msg += err.message;
+    alert(msg);
+    isRecording = false;
+    btn.innerText = '点击录音';
+    btn.classList.remove('recording');
+  }
+}
+
+function recall(msgId){
+  if(!confirm('确定撤回？')) return;
+  socket.emit('recall', msgId);
+}
+
+function renderMsg(m){
+  const isMe = m.name === username;
+  const bubbleClass = isMe ? 'bubble bubble-right' : 'bubble bubble-left';
+  const div = document.createElement('div');
+  div.className = bubbleClass;
+  div.dataset.id = m.id;
+
+  let nameHtml = isMe ? '' : `<span class="name">${m.name}</span>`;
+  let timeHtml = `<span class="time">${m.time}</span>`;
+  let durHtml = (m.type==='voice'&&m.duration) ? `<span class="duration">${m.duration}″</span>` : '';
+  let recallBtn = isMe ? `<span class="recallBtn" onclick="recall('${m.id}')">撤回</span>` : '';
+
+  if(m.type === 'text'){
+    div.innerHTML = nameHtml + m.content + timeHtml + durHtml + recallBtn;
+  }else if(m.type === 'voice'){
+    div.innerHTML = nameHtml + `<audio controls src="${m.content}">` + timeHtml + durHtml + recallBtn;
+  }else if(m.type === 'image'){
+    div.innerHTML = nameHtml + `<img src="${m.content}" onerror="this.src='https://via.placeholder.com/300?text=图片加载失败'">` + timeHtml + durHtml + recallBtn;
+  }else if(m.type === 'video'){
+    div.innerHTML = nameHtml + `<video controls src="${m.content}" onerror="this.outerHTML='<div>视频无法播放</div>'">` + timeHtml + durHtml + recallBtn;
+  }
+  return div;
+}
+
+socket.on('onlineCount', n=>{
+  document.getElementById('online').innerText = '在线：'+n;
+});
+
+socket.on('history', list=>{
+  const box = document.getElementById('msg');
+  box.innerHTML = '';
+  list.forEach(m=>box.appendChild(renderMsg(m)));
+  box.scrollTop = box.scrollHeight;
+});
+
+socket.on('new', data=>{
+  const box = document.getElementById('msg');
+  box.appendChild(renderMsg(data));
+  box.scrollTop = box.scrollHeight;
+});
+
+socket.on('recalled', msgId=>{
+  const el = document.querySelector(`[data-id="${msgId}"]`);
+  if(el) el.remove();
+});
+
+socket.on('connect_error', (err)=>{
+  console.error('连接错误',err);
+  alert('连接异常，请刷新重试');
+});
+</script>
+</body>
+</html>
